@@ -59,18 +59,25 @@ public class TallorderedKeysScript : MonoBehaviour
     private int[][] info = new int[6][] { new int[3], new int[3], new int[3], new int[3], new int[3], new int[3] };
     private static string[] exempt = null;
     private int stage;
+    private int solvesLeft;
     private int pressCount;
     private int resetCount;
     private IEnumerator sequence;
+    private IEnumerator cooldown;
     private bool[] alreadypressed = new bool[6] { true, true, true, true, true, true };
     private bool pressable;
     private List<string> presses = new List<string> { };
     private List<int> answer = new List<int> { };
+    private List<int[][]> recoveryList = new List<int[][]>();
     private List<string> labelList = new List<string> { };
     private bool colorblind;
     private bool starting = true;
     private bool startboss;
+    private bool recovery;
+    private bool finishAnim;
     private int buffer;
+    private int cooldownQueue;
+    private int recoveryIndex;
 
     //Logging
     static int moduleCounter = 1;
@@ -81,6 +88,7 @@ public class TallorderedKeysScript : MonoBehaviour
     {
         moduleID = moduleCounter++;
         sequence = Shuff();
+        cooldown = Cooldown();
         disp.text = string.Empty;
         foreach (Renderer m in meter)
         {
@@ -121,6 +129,7 @@ public class TallorderedKeysScript : MonoBehaviour
     {
         colorblind = ColorblindMode.ColorblindModeActive;
         stage = bomb.GetSolvableModuleNames().Where(x => !exempt.Contains(x)).Count();
+        solvesLeft = stage;
         List<int> initialList = new List<int> { 1, 2, 3, 4, 5, 6 };
         for(int i = 0; i < 6; i++)
         {
@@ -128,7 +137,8 @@ public class TallorderedKeysScript : MonoBehaviour
             answer.Add(initialList[rand]);
             initialList.RemoveAt(rand);
         }
-        Reset();
+        StartCoroutine(cooldown);
+        cooldownQueue++;
     }
 
     private void Update()
@@ -137,10 +147,10 @@ public class TallorderedKeysScript : MonoBehaviour
         if(buffer > 9)
         {
             buffer = 0;
-            if(stage != bomb.GetSolvableModuleNames().Where(x => !exempt.Contains(x)).Count() - bomb.GetSolvedModuleNames().Where(x => !exempt.Contains(x)).Count() && stage != 0)
+            if(solvesLeft != bomb.GetSolvableModuleNames().Where(x => !exempt.Contains(x)).Count() - bomb.GetSolvedModuleNames().Where(x => !exempt.Contains(x)).Count() && solvesLeft != 0)
             {
-                stage = bomb.GetSolvableModuleNames().Where(x => !exempt.Contains(x)).Count() - bomb.GetSolvedModuleNames().Where(x => !exempt.Contains(x)).Count();
-                Reset();
+                cooldownQueue += Mathf.Abs(solvesLeft - (bomb.GetSolvableModuleNames().Where(x => !exempt.Contains(x)).Count() - bomb.GetSolvedModuleNames().Where(x => !exempt.Contains(x)).Count()));
+                solvesLeft = bomb.GetSolvableModuleNames().Where(x => !exempt.Contains(x)).Count() - bomb.GetSolvedModuleNames().Where(x => !exempt.Contains(x)).Count();
             }
         }
     }
@@ -149,39 +159,60 @@ public class TallorderedKeysScript : MonoBehaviour
     {
         if (alreadypressed[keys.IndexOf(key)] == false && moduleSolved == false && pressable == true)
         {
-            GetComponent<KMAudio>().PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.ButtonPress, transform);
+            Audio.PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.ButtonPress, key.transform);
             alreadypressed[keys.IndexOf(key)] = true;
-            presses.Add((keys.IndexOf(key) + 1).ToString());
             key.transform.localPosition = new Vector3(0, 0, -1f);
             key.AddInteractionPunch();
-            if (pressCount < 5)
+            if (!recovery)
             {
-                pressCount++;
-            }
-            else
-            {
-                pressCount = 0;
-                string[] answ = new string[6];
-                for (int i = 0; i < 6; i++)
+                presses.Add((keys.IndexOf(key) + 1).ToString());
+                if (pressCount < 5)
                 {
-                    answ[i] = (answer.IndexOf(i + 1) + 1).ToString();
-                }
-                string ans = string.Join(string.Empty, answ);
-                string[] press = presses.ToArray();
-                string pr = string.Join(string.Empty, press);
-                Debug.LogFormat("[Tallordered Keys #{0}] After {1} reset(s), the buttons were pressed in the order: {2}", moduleID, resetCount, pr);
-                if (ans == pr)
-                {                   
-                    Audio.PlaySoundAtTransform("InputCorrect", transform);
-                    moduleSolved = true;
+                    pressCount++;
                 }
                 else
                 {
-                    GetComponent<KMBombModule>().HandleStrike();
+                    pressCount = 0;
+                    string[] answ = new string[6];
+                    for (int i = 0; i < 6; i++)
+                    {
+                        answ[i] = (answer.IndexOf(i + 1) + 1).ToString();
+                    }
+                    string ans = string.Join(string.Empty, answ);
+                    string[] press = presses.ToArray();
+                    string pr = string.Join(string.Empty, press);
+                    Debug.LogFormat("[Tallordered Keys #{0}] After {1} reset(s), the buttons were pressed in the order: {2}", moduleID, resetCount, pr);
+                    if (ans == pr)
+                    {
+                        Audio.PlaySoundAtTransform("InputCorrect", transform);
+                        moduleSolved = true;
+                    }
+                    else
+                    {
+                        GetComponent<KMBombModule>().HandleStrike();
+                        recovery = true;
+                        pressable = false;
+                        recoveryIndex = 0;
+                    }
+                    presses.Clear();
+                    labelList.Clear();
+                    resetCount++;
+                    Reset();
                 }
-                presses.Clear();
-                labelList.Clear();
-                resetCount++;
+            }
+            else
+            {
+                int[] offsets = { -100, -10, -1, 1, 10, 100 };
+                recoveryIndex += offsets[keys.IndexOf(key)];
+                if (recoveryIndex < 0)
+                    recoveryIndex = 0;
+                else if (recoveryIndex > recoveryList.Count - 1)
+                {
+                    recovery = false;
+                    recoveryIndex = recoveryList.Count - 1;
+                    disp.text = stage.ToString();
+                }
+                pressable = false;
                 Reset();
             }
         }
@@ -191,32 +222,64 @@ public class TallorderedKeysScript : MonoBehaviour
     {
         if (stage == 0)
         {
-            keyID[keyIndex].material = keyColours[color ?? info[keyIndex][0]];
-            switch (labelColor ?? info[keyIndex][1])
+            if (recovery)
             {
-                case 0:
-                    keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(255, 25, 25, 255);
-                    break;
-                case 1:
-                    keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(25, 255, 25, 255);
-                    break;
-                case 2:
-                    keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(25, 25, 255, 255);
-                    break;
-                case 3:
-                    keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(25, 255, 255, 255);
-                    break;
-                case 4:
-                    keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(255, 75, 255, 255);
-                    break;
-                default:
-                    keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(255, 255, 75, 255);
-                    break;
+                keyID[keyIndex].material = keyColours[color ?? recoveryList[recoveryIndex][keyIndex][0]];
+                switch (labelColor ?? recoveryList[recoveryIndex][keyIndex][1])
+                {
+                    case 0:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(255, 25, 25, 255);
+                        break;
+                    case 1:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(25, 255, 25, 255);
+                        break;
+                    case 2:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(25, 25, 255, 255);
+                        break;
+                    case 3:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(25, 255, 255, 255);
+                        break;
+                    case 4:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(255, 75, 255, 255);
+                        break;
+                    default:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(255, 255, 75, 255);
+                        break;
+                }
+                var labelStr = (label ?? recoveryList[recoveryIndex][keyIndex][2] + 1).ToString();
+                if (colorblind)
+                    labelStr += "\n" + "RGBCMY"[recoveryList[recoveryIndex][keyIndex][1]] + "\n\n" + "RGBCMY"[recoveryList[recoveryIndex][keyIndex][0]];
+                keys[keyIndex].GetComponentInChildren<TextMesh>().text = labelStr;
             }
-            var labelStr = (label ?? info[keyIndex][2] + 1).ToString();
-            if (colorblind)
-                labelStr += "\n" + info[keyIndex][1] + "\n\n" + info[keyIndex][0];
-            keys[keyIndex].GetComponentInChildren<TextMesh>().text = labelStr;
+            else
+            {
+                keyID[keyIndex].material = keyColours[color ?? info[keyIndex][0]];
+                switch (labelColor ?? info[keyIndex][1])
+                {
+                    case 0:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(255, 25, 25, 255);
+                        break;
+                    case 1:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(25, 255, 25, 255);
+                        break;
+                    case 2:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(25, 25, 255, 255);
+                        break;
+                    case 3:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(25, 255, 255, 255);
+                        break;
+                    case 4:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(255, 75, 255, 255);
+                        break;
+                    default:
+                        keys[keyIndex].GetComponentInChildren<TextMesh>().color = new Color32(255, 255, 75, 255);
+                        break;
+                }
+                var labelStr = (label ?? info[keyIndex][2] + 1).ToString();
+                if (colorblind)
+                    labelStr += "\n" + "RGBCMY"[info[keyIndex][1]] + "\n\n" + "RGBCMY"[info[keyIndex][0]];
+                keys[keyIndex].GetComponentInChildren<TextMesh>().text = labelStr;
+            }
         }
         else
         {
@@ -257,16 +320,21 @@ public class TallorderedKeysScript : MonoBehaviour
             labelList.Clear();
             if (stage > 0)
             {
+                int[][] temp = new int[6][] { new int[3], new int[3], new int[3], new int[3], new int[3], new int[3] };
                 for (int i = 0; i < 6; i++)
                 {
                     info[i][0] = Random.Range(0, keyList.Count());
+                    temp[i][0] = info[i][0];
                     info[i][1] = Random.Range(0, keyList[info[i][0]].Count());
+                    temp[i][1] = info[i][1];
                     info[i][2] = Random.Range(0, keyList[info[i][0]][info[i][1]].Count());
+                    temp[i][2] = info[i][2];
                     labelList.Add(keyList[info[i][0]][info[i][1]][info[i][2]]);
                     selectedKeys[i] = keyList[info[i][0]][info[i][1]][info[i][2]];
                     keyvals[info[i][0]][info[i][1]][info[i][2]] = i + 1;
                     alreadypressed[i] = true;
                 }
+                recoveryList.Add(temp);
                 string[] label = labelList.ToArray();
                 string l = string.Join(", ", label);
                 Debug.LogFormat("[Tallordered Keys #{0}] Stage {1}: the keys were {2}", moduleID, stage, l);
@@ -277,7 +345,7 @@ public class TallorderedKeysScript : MonoBehaviour
                 moduleSolved = true;
                 StartCoroutine(sequence);
             }
-            else if(stage == 0 && starting == false)
+            else if(stage == 0 && starting == false && recovery == false)
             {
                 string[] identifier = new string[6];
                 for(int i = 0; i < 6; i++)
@@ -294,7 +362,6 @@ public class TallorderedKeysScript : MonoBehaviour
                         }
                     }
                     labelList.Add(identifier[i]);
-
                 }
                 if(startboss == false)
                 {
@@ -305,10 +372,17 @@ public class TallorderedKeysScript : MonoBehaviour
                         ans[i] = (answer.IndexOf(i + 1) + 1).ToString();
                     }
                     Debug.LogFormat("[Tallordered Keys #{0}] The keys should be pressed in the order: {2}", moduleID, resetCount, string.Join(string.Empty, ans));
+                    for (int i = 0; i < 6; i++)
+                        alreadypressed[i] = true;
                 }
                 string[] label = labelList.ToArray();
                 string l = string.Join(", ", label);
                 Debug.LogFormat("[Tallordered Keys #{0}] After {1} reset(s): the keys were {2}", moduleID, resetCount, l);
+                StartCoroutine(sequence);
+            }
+            else if (stage == 0 && starting == false && recovery == true)
+            {
+                disp.text = (bomb.GetSolvableModuleNames().Where(x => !exempt.Contains(x)).Count() - recoveryIndex).ToString();
                 StartCoroutine(sequence);
             }
         }
@@ -335,16 +409,17 @@ public class TallorderedKeysScript : MonoBehaviour
                     keys[(i - 2) / 3].GetComponentInChildren<TextMesh>().text = "0";
                     if (i == 17)
                     {
+                        finishAnim = true;
                         GetComponent<KMBombModule>().HandlePass();
-                        GetComponent<KMAudio>().PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.CorrectChime, transform);
+                        Audio.PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.CorrectChime, transform);
                     }
                 }
                 else
                 {
-                    if (stage == 0)
+                    if (stage == 0 && alreadypressed[(i - 2) / 3])
                     {
                         keys[(i - 2) / 3].transform.localPosition = new Vector3(0, 0, 0);
-                        GetComponent<KMAudio>().PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.ButtonRelease, transform);
+                        Audio.PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.ButtonRelease, keys[(i - 2) / 3].transform);
                     }
                     alreadypressed[(i - 2) / 3] = false;
                     setKey((i - 2) / 3);
@@ -373,6 +448,22 @@ public class TallorderedKeysScript : MonoBehaviour
         }
     }
 
+    private IEnumerator Cooldown()
+    {
+        while (true)
+        {
+            yield return null;
+            if (cooldownQueue > 0)
+            {
+                cooldownQueue--;
+                if (!starting)
+                    stage--;
+                Reset();
+                yield return new WaitForSeconds(4f);
+            }
+        }
+    }
+
 #pragma warning disable 414
     private readonly string TwitchHelpMessage = @"!{0} press 123456 [position in reading order] | !{0} colorblind";
 #pragma warning restore 414
@@ -381,7 +472,7 @@ public class TallorderedKeysScript : MonoBehaviour
     {
         if (Regex.IsMatch(command, @"^\s*colorblind\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
         {
-            colorblind = true;
+            colorblind = !colorblind;
             for (int i = 0; i < keys.Count; i++)
                 setKey(i);
             yield return null;
@@ -400,5 +491,40 @@ public class TallorderedKeysScript : MonoBehaviour
             yield return new[] { keyToPress };
         }
     }
-}
 
+    private IEnumerator TwitchHandleForcedSolve()
+    {
+        while (!startboss) { yield return true; }
+        if (!moduleSolved)
+        {
+            while (!pressable) { yield return true; }
+            if (recovery)
+            {
+                while (recoveryIndex != recoveryList.Count - 1)
+                {
+                    keys[5].OnInteract();
+                    while (!pressable) { yield return true; }
+                }
+            }
+            string[] answ = new string[6];
+            for (int i = 0; i < 6; i++)
+                answ[i] = (answer.IndexOf(i + 1) + 1).ToString();
+            for (int i = 0; i < presses.Count; i++)
+            {
+                if (answ[i] != presses[i])
+                {
+                    moduleSolved = true;
+                    GetComponent<KMBombModule>().HandlePass();
+                    yield break;
+                }
+            }
+            int start = presses.Count;
+            for (int j = start; j < 6; j++)
+            {
+                keys[answer.IndexOf(j + 1)].OnInteract();
+                yield return new WaitForSeconds(0.1f);
+            }
+        }
+        while (!finishAnim) { yield return true; }
+    }
+}
