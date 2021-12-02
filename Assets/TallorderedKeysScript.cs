@@ -70,6 +70,7 @@ public class TallorderedKeysScript : MonoBehaviour
     private List<int> answer = new List<int> { };
     private List<int[][]> recoveryList = new List<int[][]>();
     private List<string> labelList = new List<string> { };
+    private List<int> slotsGenerated = new List<int> { };
     private bool colorblind;
     private bool starting = true;
     private bool startboss;
@@ -323,14 +324,20 @@ public class TallorderedKeysScript : MonoBehaviour
                 int[][] temp = new int[6][] { new int[3], new int[3], new int[3], new int[3], new int[3], new int[3] };
                 for (int i = 0; i < 6; i++)
                 {
+                    redo:
                     info[i][0] = Random.Range(0, keyList.Count());
                     temp[i][0] = info[i][0];
                     info[i][1] = Random.Range(0, keyList[info[i][0]].Count());
                     temp[i][1] = info[i][1];
                     info[i][2] = Random.Range(0, keyList[info[i][0]][info[i][1]].Count());
                     temp[i][2] = info[i][2];
+                    if (stage == 1 && slotsGenerated.Count(x => x == keyvals[info[i][0]][info[i][1]][info[i][2]]) == 1)
+                        goto redo;
                     labelList.Add(keyList[info[i][0]][info[i][1]][info[i][2]]);
                     selectedKeys[i] = keyList[info[i][0]][info[i][1]][info[i][2]];
+                    if (keyvals[info[i][0]][info[i][1]][info[i][2]] != 0)
+                        slotsGenerated.Remove(keyvals[info[i][0]][info[i][1]][info[i][2]]);
+                    slotsGenerated.Add(i + 1);
                     keyvals[info[i][0]][info[i][1]][info[i][2]] = i + 1;
                     alreadypressed[i] = true;
                 }
